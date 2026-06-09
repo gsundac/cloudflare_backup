@@ -1,0 +1,53 @@
+---
+name: 🌐 Get Cloudflare Zones
+
+on:
+  workflow_dispatch:
+    inputs:
+      output_format:
+        description: 'Output format'
+        required: false
+        default: 'csv'
+        type: choice
+        options:
+          - csv
+          - json
+  schedule:
+    # Run weekly on Monday at 00:00 UTC
+    - cron: '0 0 * * 1'
+
+jobs:
+  get-zones:
+    name: 📊 Fetch Cloudflare Zones
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v5
+      
+      - name: 🔍 Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq curl
+      
+      - name: 🌐 Fetch Cloudflare zones
+        env:
+          API_EMAIL: ${{ secrets.API_EMAIL }}
+          API_KEY: ${{ secrets.API_KEY }}
+        run: |
+          chmod +x SCRIPTS/GET_ZONES
+          echo "📋 Fetching Cloudflare zones..."
+          echo "id,name,created_on,modified_on,paused,plan.name,plan.price"
+          ./SCRIPTS/GET_ZONES > cloudflare-zones.csv
+      
+      - name: 💾 Upload zones as artifact
+        uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: cloudflare-zones-${{ github.run_number }}
+          path: cloudflare-zones.csv
+          retention-days: 30
+          if-no-files-found: warn
