@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Read credentials from environment variables for safety:
+#   export API_EMAIL="your-email@example.com"
+#   export API_KEY="your-global-api-key"    # Prefer a scoped API token instead
+# Or use a bearer token:
+#   export API_TOKEN="your-scoped-api-token"
+
+: "${API_EMAIL:?Set API_EMAIL}"
+: "${API_KEY:?Set API_KEY}"  # Or comment this and use API_TOKEN below
+
+# Endpoint and pagination
+BASE_URL="https://api.cloudflare.com/client/v4/zones"
+PER_PAGE=1000
+PAGE=1
+
+# Check dependencies
+command -v jq >/dev/null 2>&1 || { echo "jq is required"; exit 1; }
+command -v curl >/dev/null 2>&1 || { echo "curl is required"; exit 1; }
+
+# Optional: print CSV header
+# echo 'id,name,created_on,modified_on,paused,plan.name,plan.price'
+
+while :; do
+  URL="${BASE_URL}?per_page=${PER_PAGE}&page=${PAGE}"
+
+  # Choose ONE auth method:
+  # 1) Global key (legacy)
+  RESPONSE=$(curl -sS \
+    -H "X-Auth-Email: ${API_EMAIL}" \
+    -H "X-Auth-Key: ${API_KEY}" \
+    -H "Content-Type: application/json" \
+    "$URL")
+
+  # 2) Or API token (preferred):
+  # RESPONSE=$(curl -sS \
+  #   -H "Authorization: Bearer ${API_TOKEN}" \
+  #   -H "Content-Type: application/json" \
+  #   "$URL")
+
+  # Ensure success
+  if [[ $(echo "$RESPONSE" | jq -r '.success') != "true" ]]; then
+    echo "API request failed: $(echo "$RESPONSE" | jq -c '.errors // []')" >&2
+    exit 1
+  fi
+
+  # Print rows
+  echo "$RESPONSE" | jq -r '
+    .result[] |
+    [
+      .id,
+      .name,
+      .created_on,
+      .modified_on,
+      .paused,
+      .plan.name,
+      .plan.price
+    ] | @csv
+  '
+
+  # Pagination using result_info
+  CUR_PAGE=$(echo "$RESPONSE" | jq -r '.result_info.page')
+  TOTAL_PAGES=$(echo "$RESPONSE" | jq -r '.result_info.total_pages')
+
+  if [[ -z "$CUR_PAGE" || -z "$TOTAL_PAGES" || "$CUR_PAGE" -ge "$TOTAL_PAGES" ]]; then
+    break
+  fi
+
+  PAGE=$((PAGE + 1))
+done
